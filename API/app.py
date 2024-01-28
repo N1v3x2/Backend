@@ -1,10 +1,12 @@
 from flask import Flask, jsonify, request
 from flask_restx import Resource, Api
+from flask_cors import CORS
 import collections
 import joblib
 import pandas as pd
 
 app = Flask(__name__)
+CORS(app)
 api = Api(app)
 
 model = joblib.load('phishing_classifier.joblib')
@@ -31,6 +33,8 @@ def preprocess(email):
     for word, count in email_word_count.items():
         if word in new_email.columns:
             new_email.loc[0, word] = count
+
+    return new_email
     
 
 @app.route('/predict', methods=['GET'])
@@ -40,9 +44,11 @@ def predict():
 
     # Preprocess email_body to match the model input format
     feature_vector = preprocess(email_body)
-    
+
+    print(feature_vector)
+
     # Make a prediction
-    prediction = model.predict([feature_vector])
+    prediction = model.predict(feature_vector)
     
     # Return the result as JSON
     return jsonify({'is_phishing': bool(prediction[0])})
