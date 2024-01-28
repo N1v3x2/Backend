@@ -4,13 +4,20 @@ from flask_cors import CORS
 import collections
 import joblib
 import pandas as pd
+import re
+import csv
 
 app = Flask(__name__)
 CORS(app)
 api = Api(app)
 
 model = joblib.load('phishing_classifier.joblib')
+calibrator = joblib.load('phishing_model_calibrator.joblib')
 data = pd.read_csv('emails.csv').drop('Email No.', axis=1)
+
+with open('suspicious_words.csv', 'r') as file:
+    reader = csv.reader(file)
+    top_phishing_words = list(reader)[0]
 
 
 def preprocess(email):
@@ -35,23 +42,47 @@ def preprocess(email):
             new_email.loc[0, word] = count
 
     return new_email
-    
 
-@app.route('/predict', methods=['GET'])
-def predict():
-    # Get the email string from the query parameter
-    email_body = request.args.get('email')  
 
-    # Preprocess email_body to match the model input format
-    feature_vector = preprocess(email_body)
+@api.route('/highlight-phishing-indicators')
+class HighlightIndicators(Resource):
+    def get(self):
+        highlighted_email = request.args.get('email')
+        
+        for feature in top_phishing_words:
+            # Use re.escape to escape any special characters in the feature string
+            feature_escaped = re.escape(feature)
+            # Replace the feature with a highlighted version
+            highlighted_email = re.sub(
+                f"({feature_escaped})", 
+                r"<span class='highlight'>\1</span>", 
+                highlighted_email, 
+                flags=re.IGNORECASE
+            )
 
-    print(feature_vector)
+        return jsonify({'highlighted_email': highlighted_email})
 
-    # Make a prediction
-    prediction = model.predict(feature_vector)
-    
-    # Return the result as JSON
-    return jsonify({'is_phishing': bool(prediction[0])})
+
+@api.route('/predict')
+class Predict(Resource):
+    def get(self):
+        # Get the email string from the query parameter
+        email_body = request.args.get('email')  
+
+        # Preprocess email_body to match the model input format
+        feature_vector = preprocess(email_body)
+
+        # Make a prediction
+        prediction = model.predict(feature_vector)
+
+        # Determine probability of prediction being correct
+        probability = calibrator.predict_proba(feature_vector)
+        
+        # Return the result as JSON
+        return jsonify({
+            'is_phishing': bool(prediction[0]),
+            'probability': str(round(float(max(probability[0])) * 100, 2)) + '%',
+        })
     
 
 if __name__ == '__main__':
